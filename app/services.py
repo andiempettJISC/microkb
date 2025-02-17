@@ -75,7 +75,6 @@ def update_package_list():
                 metadata = json.loads(metadata_obj["Body"].read().decode("utf-8"))
                 if isinstance(metadata, dict):
                     package_list.append({
-                        "package_id": package_id,
                         **metadata
                     })
                 else:

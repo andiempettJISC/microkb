@@ -4,6 +4,7 @@ import hashlib
 import pandas as pd
 from flask import Blueprint, request, jsonify
 from app.services import generate_package_id, upload_to_s3, update_package_list, s3_client
+from app.validations import validate_json
 from app.config import S3_BUCKET, AWS_REGION
 
 routes = Blueprint("routes", __name__)
@@ -29,6 +30,12 @@ def calculate_checksum_from_body(body):
     md5.update(body_content)
     return md5.hexdigest()
 
+
+def allowed_file(filename):
+    """Check if file type is allowed."""
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in {"tsv", "csv"}
+
+
 @routes.route("/upload", methods=["POST"])
 def upload_package():
     """ Handles TSV ingestion, converts to JSON, and updates package index """
@@ -38,6 +45,14 @@ def upload_package():
     file = request.files["file"]
     package_name = request.form.get("package_name")
 
+    if file.filename == "":
+        return jsonify({"error": "No filename"}), 400
+    if not allowed_file(file.filename):
+        return jsonify({"error": "Invalid file type"}), 400
+    if file.stream.read(1) == b'':
+        return jsonify({"error": "Empty file provided"}), 400
+    file.stream.seek(0)  # Reset the stream position to the beginning
+
     if not package_name:
         return jsonify({"error": "Package name required"}), 400
 
@@ -45,8 +60,19 @@ def upload_package():
     package_id = request.form.get("package_id") or generate_package_id()
     
     # Read TSV and convert to JSON
-    df = pd.read_csv(file, sep="\t")
-    json_data = df.to_json(orient="records")
+    try:
+        df = pd.read_csv(file, sep="\t")
+    except Exception as e:
+        return jsonify({"error": f"Error reading TSV: {e}"}), 400
+    try:
+        json_data = df.to_json(orient="records")
+    except Exception as e:
+        return jsonify({"error": f"Error converting to JSON: {e}"}), 400
+
+    # Validate JSON data
+    is_valid, validation_errors, validation_warnings = validate_json(json.loads(json_data))
+    if not is_valid:
+        return jsonify({"error": "Validation failed", "errors": json.loads(validation_errors), "warnings": json.loads(validation_warnings)}), 400
 
     # Calculate title count using pandas
     title_count = len(df)
@@ -103,13 +129,22 @@ def upload_package():
     last_updated = latest_version_obj["LastModified"].isoformat()
 
     # Package metadata
+    # metadata = {
+    #     "package_id": package_id,
+    #     "package_name": package_name,
+    #     "latest_version": version,
+    #     "date_created": date_created,
+    #     "last_updated": last_updated,
+    #     "title_count": title_count,
+    #     "versions": {}
+    # }
     metadata = {
-        "package_id": package_id,
-        "package_name": package_name,
-        "latest_version": version,
-        "date_created": date_created,
-        "last_updated": last_updated,
-        "title_count": title_count,
+        "identifier": package_id,
+        "name": package_name,
+        "latest": version,
+        "dateCreated": date_created,
+        "lastUpdated": last_updated,
+        "titleCount": title_count,
         "versions": {}
     }
 
@@ -129,6 +164,8 @@ def upload_package():
 
     update_package_list()
 
+    if validation_warnings:
+        return jsonify({"message": "Package uploaded with warnings", "package_id": package_id, "version": version, "warnings": json.loads(validation_warnings)}), 200
     return jsonify({"message": "Package uploaded successfully", "package_id": package_id, "version": version}), 200
 
 @routes.route("/packages", methods=["GET"])
@@ -223,13 +260,23 @@ def download_tsv(package_id):
             latest_version = max(int(v) for v in versions.keys())
             tsv_key = f"packages/{package_id}/versions/{latest_version}/raw.tsv"
 
+        # Get the package name from metadata
+        package_name = metadata.get("package_name", package_id)
+
         # Generate pre-signed URL
-        url = s3_client.generate_presigned_url(
+        presigned_url = s3_client.generate_presigned_url(
             'get_object',
             Params={'Bucket': S3_BUCKET, 'Key': tsv_key},
             ExpiresIn=3600
         )
-    except s3_client.exceptions.NoSuchKey:
-        return jsonify({"error": "File not found"}), 404
 
-    return jsonify({"url": url}), 200
+        # Set the Content-Disposition header to specify the filename
+        response = jsonify({"url": presigned_url, "package_name": package_name})
+        # response.headers["Content-Disposition"] = f"attachment; filename={package_name}.tsv"
+        return response
+
+    except s3_client.exceptions.NoSuchKey:
+        return jsonify({"error": "Package not found"}), 404
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
