@@ -90,6 +90,13 @@ def upload_package():
     file.seek(0)  # Reset file pointer
     tsv_url = upload_to_s3(file, tsv_s3_key, 'tsv')
 
+    # If first upload, Find the earliest timestamp for date_created
+    if not date_created:
+        response = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=f"packages/{package_id}/versions/")
+        if "Contents" in response and response["Contents"]:
+            first_version_obj = min(response["Contents"], key=lambda x: x["LastModified"])
+            date_created = first_version_obj["LastModified"].isoformat()
+
     # Use head_object to get the latest version's LastModified timestamp
     latest_version_key = f"packages/{package_id}/versions/{version}/raw.tsv"
     latest_version_obj = s3_client.head_object(Bucket=S3_BUCKET, Key=latest_version_key)
