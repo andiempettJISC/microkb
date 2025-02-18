@@ -145,7 +145,8 @@ def upload_package():
         "dateCreated": date_created,
         "lastUpdated": last_updated,
         "titleCount": title_count,
-        "versions": {}
+        "versions": {},
+        "packageContentAsJson" : f"{request.host_url}package/{package_id}"
     }
 
      # List all versions and update metadata
@@ -198,9 +199,17 @@ def get_package(package_id):
         package_json = json.loads(package_json_obj["Body"].read().decode("utf-8"))
 
         # Combine metadata and package JSON
+        # combined_data = {
+        #     "metadata": metadata,
+        #     "title_list": package_json
+        # }
         combined_data = {
-            "metadata": metadata,
-            "title_list": package_json
+        "Packages": [
+                {
+                    **metadata,
+                    "TitleList": package_json
+                }
+            ]
         }
 
     except s3_client.exceptions.NoSuchKey:

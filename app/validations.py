@@ -36,4 +36,10 @@ def validate_json(json_data):
         if issn and not is_valid_issn_checksum(issn):
             warnings.append({"row": i, "warning": f"ISSN check digit does not match", "data": issn})
 
-    return (False, json.dumps(errors), json.dumps(warnings)) if errors else (True, None, json.dumps(warnings))
+    if errors and warnings:
+        return (False, json.dumps(errors), json.dumps(warnings))
+    if errors:
+        return (False, json.dumps(errors), None)
+    if warnings:
+        return (True, None, json.dumps(warnings))
+    return (True, None, None)

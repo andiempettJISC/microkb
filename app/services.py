@@ -82,5 +82,13 @@ def update_package_list():
             except s3_client.exceptions.NoSuchKey:
                 continue
 
-    # Upload updated list
-    s3_client.put_object(Bucket=S3_BUCKET, Key=s3_key, Body=json.dumps(package_list))
+    # Wrap the package list in the initial JSON structure
+    package_list_json = {"packages": package_list}
+
+    # Save the updated package list back to S3
+    s3_client.put_object(
+        Bucket=S3_BUCKET,
+        Key=s3_key,
+        Body=json.dumps(package_list_json),
+        ContentType="application/json"
+    )
