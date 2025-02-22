@@ -289,3 +289,27 @@ def download_tsv(package_id):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@routes.route("/package/<package_id>", methods=["DELETE"])
+def delete_package(package_id):
+    """ Deletes a package and all its associated files from S3 """
+    try:
+        # List all objects in the package directory
+        response = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=f"packages/{package_id}/")
+        objects_to_delete = [{"Key": obj["Key"]} for obj in response.get("Contents", [])]
+
+        if not objects_to_delete:
+            return jsonify({"error": "Package not found"}), 404
+
+        # Delete all objects in the package directory
+        s3_client.delete_objects(
+            Bucket=S3_BUCKET,
+            Delete={"Objects": objects_to_delete}
+        )
+
+        update_package_list()
+        
+        return jsonify({"success": f"Package {package_id} deleted successfully"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
