@@ -71,6 +71,7 @@ def upload_package():
 
     # Validate JSON data
     is_valid, validation_errors, validation_warnings = validate_json(json.loads(json_data))
+    print(is_valid, validation_errors, validation_warnings)
     if not is_valid:
         return jsonify({"error": "Validation failed", "errors": json.loads(validation_errors), "warnings": json.loads(validation_warnings)}), 400
 
