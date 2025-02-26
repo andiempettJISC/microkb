@@ -1,4 +1,4 @@
-import os
+import math
 import json
 import hashlib
 import pandas as pd
@@ -172,14 +172,36 @@ def upload_package():
 
 @routes.route("/packages", methods=["GET"])
 def list_packages():
-    """ Returns the package list from S3 """
+    """ Returns the package list from S3 with pagination """
     try:
         obj = s3_client.get_object(Bucket=S3_BUCKET, Key="package_list.json")
-        package_list = json.loads(obj["Body"].read().decode("utf-8"))
+        package_list = json.loads(obj["Body"].read().decode("utf-8")).get("packages", [])
     except s3_client.exceptions.NoSuchKey:
         package_list = []
 
-    return jsonify(package_list), 200
+    # Get pagination parameters
+    page = int(request.args.get("page", 1))
+    per_page = min(int(request.args.get("per_page", 5)), 100)
+
+    # Calculate start and end indices for the current page
+    start = (page - 1) * per_page
+    end = start + per_page
+
+    # Paginate the package list
+    paginated_packages = package_list[start:end]
+
+    # Prepare the response
+    response = {
+        "page": page,
+        "per_page": per_page,
+        "total": len(package_list),
+        "packages": paginated_packages
+    }
+
+    if page > math.ceil(len(package_list) / per_page):
+         return jsonify({"error": "Page not found"}), 404
+
+    return jsonify(response), 200
 
 @routes.route("/package/<package_id>", methods=["GET"])
 def get_package(package_id):
