@@ -60,10 +60,17 @@ def upload_to_s3(file_data, package_id, file_type):
     return f"{S3_ENDPOINT_URL}/{S3_BUCKET}/{s3_key}" if S3_ENDPOINT_URL else f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
 
 
-def update_package_list():
+def update_package_list(append=False):
     """ Reads existing package metadata from S3 and generates a new package list """
     s3_key = "package_list.json"
     package_list = []
+
+    if append:
+        try:
+            obj = s3_client.get_object(Bucket=S3_BUCKET, Key=s3_key)
+            package_list = json.loads(obj["Body"].read().decode("utf-8")).get("packages", [])
+        except s3_client.exceptions.NoSuchKey:
+            package_list = []
 
     # List all objects in the 'packages/' prefix
     response = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix="packages/")
@@ -81,6 +88,17 @@ def update_package_list():
                     print(f"Warning: Metadata for package {package_id} is not a dictionary.")
             except s3_client.exceptions.NoSuchKey:
                 continue
+
+    # Wrap the package list in the initial JSON structure
+    package_list_json = {"packages": package_list}
+
+    # Save the updated package list back to S3
+    s3_client.put_object(
+        Bucket=S3_BUCKET,
+        Key=s3_key,
+        Body=json.dumps(package_list_json),
+        ContentType="application/json"
+    )
 
     # Wrap the package list in the initial JSON structure
     package_list_json = {"packages": package_list}

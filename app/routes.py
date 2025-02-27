@@ -164,7 +164,7 @@ def upload_package():
     # Upload metadata
     upload_to_s3(json.dumps(metadata).encode("utf-8"), metadata_s3_key, 'json')
 
-    update_package_list()
+    update_package_list(append=True)
 
     if validation_warnings:
         return jsonify({"message": "Package uploaded with warnings", "package_id": package_id, "version": version, "warnings": json.loads(validation_warnings)}), 200
@@ -178,6 +178,19 @@ def list_packages():
         package_list = json.loads(obj["Body"].read().decode("utf-8")).get("packages", [])
     except s3_client.exceptions.NoSuchKey:
         package_list = []
+
+    # Check if the 'all' query parameter is set to 'true'
+    all_packages = request.args.get("all", "false").lower() == "true"
+
+    if all_packages:
+        # Return all packages without pagination
+        response = {
+            "page": 1,
+            "per_page": len(package_list),
+            "total": len(package_list),
+            "packages": package_list
+        }
+        return jsonify(response), 200
 
     # Get pagination parameters
     page = int(request.args.get("page", 1))
