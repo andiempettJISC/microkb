@@ -60,7 +60,7 @@ def upload_to_s3(file_data, package_id, file_type):
     return f"{S3_ENDPOINT_URL}/{S3_BUCKET}/{s3_key}" if S3_ENDPOINT_URL else f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
 
 
-def update_package_list(append=False):
+def update_package_list(new_metadata=None, append=False):
     """ Reads existing package metadata from S3 and generates a new package list """
     s3_key = "package_list.json"
     package_list = []
@@ -72,33 +72,24 @@ def update_package_list(append=False):
         except s3_client.exceptions.NoSuchKey:
             package_list = []
 
-    # List all objects in the 'packages/' prefix
-    response = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix="packages/")
-    for obj in response.get("Contents", []):
-        if obj["Key"].endswith("metadata.json"):
-            package_id = obj["Key"].split("/")[1]
-            try:
-                metadata_obj = s3_client.get_object(Bucket=S3_BUCKET, Key=obj["Key"])
-                metadata = json.loads(metadata_obj["Body"].read().decode("utf-8"))
-                if isinstance(metadata, dict):
-                    package_list.append({
-                        **metadata
-                    })
-                else:
-                    print(f"Warning: Metadata for package {package_id} is not a dictionary.")
-            except s3_client.exceptions.NoSuchKey:
-                continue
+        if new_metadata:
+            package_list.append(new_metadata)
 
-    # Wrap the package list in the initial JSON structure
-    package_list_json = {"packages": package_list}
-
-    # Save the updated package list back to S3
-    s3_client.put_object(
-        Bucket=S3_BUCKET,
-        Key=s3_key,
-        Body=json.dumps(package_list_json),
-        ContentType="application/json"
-    )
+    else:
+        # List all objects in the 'packages/' prefix
+        response = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix="packages/")
+        for obj in response.get("Contents", []):
+            if obj["Key"].endswith("metadata.json"):
+                package_id = obj["Key"].split("/")[1]
+                try:
+                    metadata_obj = s3_client.get_object(Bucket=S3_BUCKET, Key=obj["Key"])
+                    metadata = json.loads(metadata_obj["Body"].read().decode("utf-8"))
+                    if isinstance(metadata, dict):
+                        package_list.append(metadata)
+                    else:
+                        print(f"Warning: Metadata for package {package_id} is not a dictionary.")
+                except s3_client.exceptions.NoSuchKey:
+                    continue
 
     # Wrap the package list in the initial JSON structure
     package_list_json = {"packages": package_list}

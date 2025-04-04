@@ -5,7 +5,7 @@ import pandas as pd
 from flask import Blueprint, request, jsonify
 from app.services import generate_package_id, upload_to_s3, update_package_list, s3_client
 from app.validations import validate_json
-from app.config import S3_BUCKET, AWS_REGION
+from app.config import S3_BUCKET, AWS_REGION, ADDITIONAL_IDENTIFIERS_ALLOW
 
 routes = Blueprint("routes", __name__)
 
@@ -35,7 +35,6 @@ def allowed_file(filename):
     """Check if file type is allowed."""
     return "." in filename and filename.rsplit(".", 1)[1].lower() in {"tsv", "csv"}
 
-
 @routes.route("/upload", methods=["POST"])
 def upload_package():
     """ Handles TSV ingestion, converts to JSON, and updates package index """
@@ -44,6 +43,7 @@ def upload_package():
 
     file = request.files["file"]
     package_name = request.form.get("package_name")
+    additional_identifiers = request.form.get("additional_identifiers")
 
     if file.filename == "":
         return jsonify({"error": "No filename"}), 400
@@ -57,8 +57,23 @@ def upload_package():
         return jsonify({"error": "Package name required"}), 400
 
     # Generate or use provided package ID
-    package_id = request.form.get("package_id") or generate_package_id()
-    
+    package_id = generate_package_id()
+
+    # Validate additional_identifiers
+    if additional_identifiers:
+        try:
+            print(additional_identifiers)
+            additional_identifiers = json.loads(additional_identifiers)
+            if not isinstance(additional_identifiers, list):
+                raise ValueError("Invalid additional_identifiers format")
+            for identifier in additional_identifiers:
+                if identifier["type"] in ADDITIONAL_IDENTIFIERS_ALLOW:
+                    return jsonify({"error": f"Identifier type {identifier['type']} is not valid"}), 400
+                if not isinstance(identifier["identifier"], int) or identifier["identifier"] >= 10000:
+                    return jsonify({"error": "Identifier must be an integer less than 10000"}), 400
+        except (ValueError, KeyError, TypeError) as e:
+            return jsonify({"error": f"Invalid additional_identifiers: {e}"}), 400
+
     # Read TSV and convert to JSON
     try:
         df = pd.read_csv(file, sep="\t")
@@ -130,15 +145,6 @@ def upload_package():
     last_updated = latest_version_obj["LastModified"].isoformat()
 
     # Package metadata
-    # metadata = {
-    #     "package_id": package_id,
-    #     "package_name": package_name,
-    #     "latest_version": version,
-    #     "date_created": date_created,
-    #     "last_updated": last_updated,
-    #     "title_count": title_count,
-    #     "versions": {}
-    # }
     metadata = {
         "identifier": package_id,
         "name": package_name,
@@ -147,8 +153,12 @@ def upload_package():
         "lastUpdated": last_updated,
         "titleCount": title_count,
         "versions": {},
+        "additional_identifiers": [],
         "packageContentAsJson" : f"{request.host_url}package/{package_id}"
     }
+
+    if additional_identifiers:
+        metadata["additional_identifiers"] = additional_identifiers
 
      # List all versions and update metadata
     response = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=f"packages/{package_id}/versions/")
@@ -164,7 +174,7 @@ def upload_package():
     # Upload metadata
     upload_to_s3(json.dumps(metadata).encode("utf-8"), metadata_s3_key, 'json')
 
-    update_package_list(append=True)
+    update_package_list()
 
     if validation_warnings:
         return jsonify({"message": "Package uploaded with warnings", "package_id": package_id, "version": version, "warnings": json.loads(validation_warnings)}), 200
@@ -349,3 +359,7 @@ def delete_package(package_id):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+@routes.route("/packages/metadata/additional_identifiers", methods=["GET"])
+def list_additional_identifiers():
+    return jsonify(ADDITIONAL_IDENTIFIERS_ALLOW)
